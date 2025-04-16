@@ -112,8 +112,8 @@ public:
         vector<double> activation = input;
         
         for (int l = 0; l < num_hidden_layers + 1; ++l) {
-            vector<vector<double>> W = weights[l];
-            vector<double> b = biases[l];
+            const vector<vector<double>>& W = weights[l];
+            const vector<double>& b = biases[l];
             vector<double> z;
 
             for (size_t i = 0; i < W.size(); ++i) {
@@ -144,9 +144,9 @@ public:
         vector<vector<double>> zs;
 
         for (int l = 0; l < num_layers; ++l) {
-            vector<double> a_prev = activations.back();
-            vector<vector<double>> W = weights[l];
-            vector<double> b = biases[l];
+            const vector<double>& a_prev = activations.back();
+            const vector<vector<double>>& W = weights[l];
+            const vector<double>& b = biases[l];
 
             vector<double> z;
             for (size_t i = 0; i < W.size(); ++i) {
