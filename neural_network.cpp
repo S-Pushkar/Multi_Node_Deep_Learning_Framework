@@ -15,7 +15,6 @@ private:
     int output_neurons;
     double learning_rate;
     vector<string> activation_functions;
-    int epochs;
 
     vector<double> apply_activation(const vector<double>& z, const string& name) {
         vector<double> result;
@@ -82,7 +81,7 @@ public:
                   double lr, const vector<string>& activations, int epochs)
         : num_hidden_layers(num_hidden), neurons_per_hidden(neurons_hidden),
           output_neurons(output_size), learning_rate(lr),
-          activation_functions(activations), epochs(epochs) {
+          activation_functions(activations) {
         if (activations.size() != (num_hidden + 1)) {
             throw invalid_argument("Number of activation functions must match hidden layers + output layer");
         }
