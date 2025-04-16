@@ -1,273 +1,291 @@
 #include <vector>
-#include <stdexcept>
-#include <random>
-#include <cmath>
+#include <string>
 #include <algorithm>
+#include <stdexcept>
+#include <cmath>
 #include <iostream>
-#include <utility>
+#include <iomanip>
 
 using namespace std;
-
-enum class Activation {
-    Sigmoid,
-    ReLU,
-    Softmax,
-    Tanh
-};
 
 class NeuralNetwork {
 private:
     int num_hidden_layers;
     vector<int> neurons_per_hidden;
-    float learning_rate;
-    vector<Activation> activations;
-    vector<vector<float>> inputs;
-    vector<vector<float>> targets;
-    vector<vector<vector<float>>> weights;
-    vector<vector<float>> biases;
+    int output_neurons;
+    double learning_rate;
+    vector<string> activation_functions;
+    int epochs;
 
-    vector<vector<float>> initialize_weights(int rows, int cols) {
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_real_distribution<float> dist(-0.5f, 0.5f);
-        
-        vector<vector<float>> matrix(rows, vector<float>(cols));
-        for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) {
-                matrix[i][j] = dist(gen);
-            }
-        }
-        return matrix;
-    }
-
-    vector<float> initialize_biases(int size) {
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_real_distribution<float> dist(-0.5f, 0.5f);
-        
-        vector<float> bias(size);
-        for (int i = 0; i < size; ++i) {
-            bias[i] = dist(gen);
-        }
-        return bias;
-    }
-
-    vector<float> matrix_vector_multiply(const vector<vector<float>>& mat, const vector<float>& vec) {
-        if (mat.empty() || mat[0].size() != vec.size())
-            throw invalid_argument("Matrix columns must match vector size");
-        
-        vector<float> result(mat.size(), 0.0f);
-        for (size_t i = 0; i < mat.size(); ++i) {
-            for (size_t j = 0; j < vec.size(); ++j) {
-                result[i] += mat[i][j] * vec[j];
+    vector<double> apply_activation(const vector<double>& z, const string& name) {
+        vector<double> result;
+        for (double val : z) {
+            if (name == "sigmoid") {
+                result.push_back(1.0 / (1 + exp(-val)));
+            } else if (name == "tanh") {
+                result.push_back(tanh(val));
+            } else if (name == "relu") {
+                result.push_back(max(0.0, val));
+            } else if (name == "linear") {
+                result.push_back(val);
+            } else {
+                throw invalid_argument("Unknown activation function: " + name);
             }
         }
         return result;
     }
 
-    vector<vector<float>> transpose(const vector<vector<float>>& mat) {
-        if (mat.empty()) return {};
-        size_t rows = mat.size();
-        size_t cols = mat[0].size();
-        vector<vector<float>> transposed(cols, vector<float>(rows));
-        for (size_t i = 0; i < cols; ++i) {
-            for (size_t j = 0; j < rows; ++j) {
-                transposed[i][j] = mat[j][i];
+    vector<double> apply_activation_derivative(const vector<double>& z, const string& name) {
+        vector<double> result;
+        for (double val : z) {
+            if (name == "sigmoid") {
+                double s = 1.0 / (1 + exp(-val));
+                result.push_back(s * (1 - s));
+            } else if (name == "tanh") {
+                double t = tanh(val);
+                result.push_back(1 - t * t);
+            } else if (name == "relu") {
+                result.push_back(val > 0 ? 1.0 : 0.0);
+            } else if (name == "linear") {
+                result.push_back(1.0);
+            } else {
+                throw invalid_argument("Unknown activation function: " + name);
             }
         }
-        return transposed;
-    }
-
-    void apply_activation(vector<float>& vec, Activation func) {
-        switch(func) {
-            case Activation::Sigmoid:
-                for (auto& x : vec) x = 1.0f / (1.0f + exp(-x));
-                break;
-            case Activation::ReLU:
-                for (auto& x : vec) x = max(0.0f, x);
-                break;
-            case Activation::Softmax: {
-                float max_val = *max_element(vec.begin(), vec.end());
-                float sum = 0.0f;
-                for (auto& x : vec) {
-                    x = exp(x - max_val);
-                    sum += x;
-                }
-                for (auto& x : vec) x /= sum;
-                break;
-            }
-            case Activation::Tanh:
-                for (auto& x : vec) x = tanh(x);
-                break;
-        }
-    }
-
-    vector<float> compute_activation_derivative(const vector<float>& vec, Activation func) {
-        vector<float> derivative(vec.size());
-        switch(func) {
-            case Activation::Sigmoid:
-                for (size_t i = 0; i < vec.size(); ++i)
-                    derivative[i] = vec[i] * (1 - vec[i]);
-                break;
-            case Activation::ReLU:
-                for (size_t i = 0; i < vec.size(); ++i)
-                    derivative[i] = (vec[i] > 0) ? 1.0f : 0.0f;
-                break;
-            case Activation::Tanh:
-                for (size_t i = 0; i < vec.size(); ++i) {
-                    float t = tanh(vec[i]);
-                    derivative[i] = 1 - t * t;
-                }
-                break;
-            default:
-                for (auto& d : derivative) d = 1.0f;
-        }
-        return derivative;
-    }
-
-    vector<float> elementwise_multiply(const vector<float>& a, const vector<float>& b) {
-        if (a.size() != b.size())
-            throw invalid_argument("Vectors must be same size");
-            
-        vector<float> result(a.size());
-        for (size_t i = 0; i < a.size(); ++i)
-            result[i] = a[i] * b[i];
         return result;
     }
 
-    vector<vector<float>> outer_product(const vector<float>& a, const vector<float>& b) {
-        vector<vector<float>> result(a.size(), vector<float>(b.size()));
-        for (size_t i = 0; i < a.size(); ++i)
-            for (size_t j = 0; j < b.size(); ++j)
-                result[i][j] = a[i] * b[j];
+    vector<double> subtract_vectors(const vector<double>& a, const vector<double>& b) {
+        if (a.size() != b.size()) {
+            throw invalid_argument("Vector sizes do not match for subtraction");
+        }
+        vector<double> result;
+        for (size_t i = 0; i < a.size(); ++i) {
+            result.push_back(a[i] - b[i]);
+        }
+        return result;
+    }
+
+    vector<double> hadamard_product(const vector<double>& a, const vector<double>& b) {
+        if (a.size() != b.size()) {
+            throw invalid_argument("Vector sizes do not match for Hadamard product");
+        }
+        vector<double> result;
+        for (size_t i = 0; i < a.size(); ++i) {
+            result.push_back(a[i] * b[i]);
+        }
         return result;
     }
 
 public:
-    NeuralNetwork(int num_hidden, 
-                 vector<int> neurons_per_hidden,
-                 float lr,
-                 vector<Activation> activations,
-                 const vector<vector<float>>& inputs,
-                 const vector<vector<float>>& targets)
-        : num_hidden_layers(num_hidden),
-          neurons_per_hidden(neurons_per_hidden),
-          learning_rate(lr),
-          activations(activations),
-          inputs(inputs),
-          targets(targets) {
-        
-        if (activations.size() != num_hidden_layers + 1)
-            throw invalid_argument("Invalid number of activation functions");
-            
-        if (inputs.empty() || targets.empty())
-            throw invalid_argument("Empty training data");
-            
-        int input_size = inputs[0].size();
-        int output_size = targets[0].size();
-        
-        // Initialize weights and biases
-        // Input to first hidden layer
-        weights.push_back(initialize_weights(neurons_per_hidden[0], input_size));
-        biases.push_back(initialize_biases(neurons_per_hidden[0]));
-        
-        // Hidden layers
-        for (int i = 1; i < num_hidden_layers; ++i) {
-            weights.push_back(initialize_weights(neurons_per_hidden[i], neurons_per_hidden[i-1]));
-            biases.push_back(initialize_biases(neurons_per_hidden[i]));
+    NeuralNetwork(int num_hidden, const vector<int>& neurons_hidden, int output_size,
+                  double lr, const vector<string>& activations, int epochs)
+        : num_hidden_layers(num_hidden), neurons_per_hidden(neurons_hidden),
+          output_neurons(output_size), learning_rate(lr),
+          activation_functions(activations), epochs(epochs) {
+        if (activations.size() != (num_hidden + 1)) {
+            throw invalid_argument("Number of activation functions must match hidden layers + output layer");
         }
-        
-        // Last hidden to output layer
-        weights.push_back(initialize_weights(output_size, neurons_per_hidden.back()));
-        biases.push_back(initialize_biases(output_size));
     }
 
-    pair<vector<vector<vector<float>>>, vector<vector<float>>> train() {
-        for (size_t s = 0; s < inputs.size(); ++s) {
-            const auto& input = inputs[s];
-            const auto& target = targets[s];
-            
-            // Forward pass
-            vector<vector<float>> activs = {input};
-            for (size_t i = 0; i < weights.size(); ++i) {
-                auto z = matrix_vector_multiply(weights[i], activs.back());
-                // Add bias
-                for (size_t j = 0; j < z.size(); ++j) {
-                    z[j] += biases[i][j];
+    vector<double> forward_pass(const vector<double>& input,
+                               const vector<vector<vector<double>>>& weights,
+                               const vector<vector<double>>& biases) {
+        vector<double> activation = input;
+        
+        for (int l = 0; l < num_hidden_layers + 1; ++l) {
+            vector<vector<double>> W = weights[l];
+            vector<double> b = biases[l];
+            vector<double> z;
+
+            for (size_t i = 0; i < W.size(); ++i) {
+                double sum = 0.0;
+                for (size_t j = 0; j < activation.size(); ++j) {
+                    sum += activation[j] * W[i][j];
                 }
-                apply_activation(z, activations[i]);
-                activs.push_back(z);
+                sum += b[i];
+                z.push_back(sum);
             }
-            
-            // Backward pass
-            vector<vector<float>> deltas(weights.size());
-            
-            // Output layer
-            vector<float> error(activs.back().size());
-            for (size_t i = 0; i < error.size(); ++i)
-                error[i] = activs.back()[i] - target[i];
-            
-            if (activations.back() == Activation::Softmax) {
-                deltas.back() = error;
-            } else {
-                auto deriv = compute_activation_derivative(activs.back(), activations.back());
-                deltas.back() = elementwise_multiply(error, deriv);
-            }
-            
-            // Hidden layers
-            for (int i = weights.size()-2; i >= 0; --i) {
-                auto transposed = transpose(weights[i+1]);
-                auto delta = matrix_vector_multiply(transposed, deltas[i+1]);
-                auto deriv = compute_activation_derivative(activs[i+1], activations[i]);
-                deltas[i] = elementwise_multiply(delta, deriv);
-            }
-            
-            // Update weights and biases
-            for (size_t i = 0; i < weights.size(); ++i) {
-                auto grad = outer_product(deltas[i], activs[i]);
-                for (size_t r = 0; r < weights[i].size(); ++r) {
-                    for (size_t c = 0; c < weights[i][r].size(); ++c) {
-                        weights[i][r][c] -= learning_rate * grad[r][c];
-                    }
+
+            activation = apply_activation(z, activation_functions[l]);
+        }
+
+        return activation;
+    }
+
+    pair<vector<vector<vector<double>>>, vector<vector<double>>> train(
+        const vector<double>& input,
+        const vector<double>& target,
+        const vector<vector<vector<double>>>& weights,
+        const vector<vector<double>>& biases) {
+
+        int num_layers = num_hidden_layers + 1;
+
+        // Forward pass
+        vector<vector<double>> activations = {input};
+        vector<vector<double>> zs;
+
+        for (int l = 0; l < num_layers; ++l) {
+            vector<double> a_prev = activations.back();
+            vector<vector<double>> W = weights[l];
+            vector<double> b = biases[l];
+
+            vector<double> z;
+            for (size_t i = 0; i < W.size(); ++i) {
+                double sum = 0.0;
+                if (W[i].size() != a_prev.size()) {
+                    throw invalid_argument("Weight matrix dimension mismatch in layer " + to_string(l));
                 }
-                // Update biases
-                for (size_t j = 0; j < biases[i].size(); ++j) {
-                    biases[i][j] -= learning_rate * deltas[i][j];
+                for (size_t j = 0; j < a_prev.size(); ++j) {
+                    sum += a_prev[j] * W[i][j];
                 }
+                sum += b[i];
+                z.push_back(sum);
+            }
+            zs.push_back(z);
+
+            vector<double> a = apply_activation(z, activation_functions[l]);
+            activations.push_back(a);
+        }
+
+        // Backward pass
+        vector<vector<double>> deltas;
+        vector<double> a_output = activations.back();
+        vector<double> z_output = zs.back();
+        vector<double> delta_output = hadamard_product(
+            subtract_vectors(a_output, target),
+            apply_activation_derivative(z_output, activation_functions.back())
+        );
+        deltas.push_back(delta_output);
+
+        for (int l = num_layers - 2; l >= 0; --l) {
+            vector<double> delta_next = deltas.back();
+            vector<vector<double>> W_next = weights[l + 1];
+            vector<double> z_prev = zs[l];
+
+            vector<double> wT_delta(W_next[0].size(), 0.0);
+            for (size_t i = 0; i < W_next[0].size(); ++i) {
+                for (size_t j = 0; j < W_next.size(); ++j) {
+                    wT_delta[i] += W_next[j][i] * delta_next[j];
+                }
+            }
+
+            vector<double> delta_l = hadamard_product(
+                wT_delta,
+                apply_activation_derivative(z_prev, activation_functions[l])
+            );
+            deltas.push_back(delta_l);
+        }
+
+        reverse(deltas.begin(), deltas.end());
+
+        // Update weights and biases
+        vector<vector<vector<double>>> updated_weights = weights;
+        vector<vector<double>> updated_biases = biases;
+
+        for (int l = 0; l < num_layers; ++l) {
+            vector<double> delta = deltas[l];
+            vector<double> a_prev = activations[l];
+            vector<vector<double>>& W = updated_weights[l];
+            vector<double>& b = updated_biases[l];
+
+            for (size_t i = 0; i < W.size(); ++i) {
+                for (size_t j = 0; j < a_prev.size(); ++j) {
+                    W[i][j] -= learning_rate * a_prev[j] * delta[i];
+                }
+            }
+
+            for (size_t i = 0; i < b.size(); ++i) {
+                b[i] -= learning_rate * delta[i];
             }
         }
-        return {weights, biases};
+
+        return {updated_weights, updated_biases};
     }
 };
 
-int main() {
-    vector<vector<float>> inputs = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
-    vector<vector<float>> targets = {{0}, {1}, {1}, {0}};
-
-    NeuralNetwork nn(1,                                       // 1 hidden layer
-                     {2},                                     // 2 neurons in hidden layer
-                     0.1,                                     // learning rate
-                     {Activation::ReLU, Activation::Sigmoid}, // activations
-                     inputs,
-                     targets);
-
-    auto trained = nn.train();
-    auto trained_weights = trained.first;
-    auto trained_biases = trained.second;
-
-    for (size_t i = 0; i < trained_weights.size(); ++i) {
-        cout << "Layer " << i << " weights:\n";
-        for (const auto &row : trained_weights[i]) {
-            for (const auto &weight : row) {
-                cout << weight << " ";
+void print_weights_biases(const vector<vector<vector<double>>>& weights, 
+                         const vector<vector<double>>& biases) {
+    cout << fixed << setprecision(4);
+    for (size_t l = 0; l < weights.size(); ++l) {
+        cout << "Layer " << l + 1 << " weights:" << endl;
+        for (size_t i = 0; i < weights[l].size(); ++i) {
+            cout << "  Neuron " << i + 1 << ": [";
+            for (size_t j = 0; j < weights[l][i].size(); ++j) {
+                cout << weights[l][i][j];
+                if (j < weights[l][i].size() - 1) cout << ", ";
             }
-            cout << "\n";
+            cout << "]" << endl;
         }
-        cout << "Layer " << i << " biases:\n";
-        for (const auto &bias : trained_biases[i]) {
-            cout << bias << " ";
+        cout << "Layer " << l + 1 << " biases: [";
+        for (size_t i = 0; i < biases[l].size(); ++i) {
+            cout << biases[l][i];
+            if (i < biases[l].size() - 1) cout << ", ";
         }
-        cout << "\n-----\n";
+        cout << "]" << endl << endl;
     }
+    cout << "----------------------------------------" << endl;
+}
+
+int main() {
+    // Network configuration
+    int num_hidden_layers = 2;
+    vector<int> neurons_per_hidden = {4, 3}; // 4 neurons in first hidden layer, 3 in second
+    int output_neurons = 2;
+    double learning_rate = 0.1;
+    vector<string> activation_functions = {"relu", "tanh", "sigmoid"}; // for hidden layers and output
+    int epochs = 200;
+
+    // Create neural network
+    NeuralNetwork nn(num_hidden_layers, neurons_per_hidden, output_neurons,
+                    learning_rate, activation_functions, epochs);
+
+    // Sample input and target
+    vector<double> input = {0.5, -0.2, 0.8};
+    vector<double> target = {0.7, 0.3};
+
+    // Initialize weights and biases (random values for demonstration)
+    vector<vector<vector<double>>> weights = {
+        // Layer 1 weights (4 neurons, each with 3 inputs)
+        {{0.1, -0.2, 0.3}, {0.4, 0.1, -0.1}, {-0.2, 0.3, 0.1}, {0.2, -0.1, 0.4}},
+        // Layer 2 weights (3 neurons, each with 4 inputs)
+        {{0.2, -0.1, 0.3, 0.1}, {0.1, 0.4, -0.2, 0.3}, {-0.3, 0.2, 0.1, -0.2}},
+        // Output layer weights (2 neurons, each with 3 inputs)
+        {{0.3, -0.2, 0.1}, {0.1, 0.4, -0.3}}
+    };
+
+    vector<vector<double>> biases = {
+        // Layer 1 biases (4 neurons)
+        {0.1, -0.1, 0.2, -0.2},
+        // Layer 2 biases (3 neurons)
+        {0.3, -0.2, 0.1},
+        // Output layer biases (2 neurons)
+        {0.2, -0.1}
+    };
+
+    // Training loop
+    for (int epoch = 0; epoch < epochs; ++epoch) {
+        cout << "Epoch " << epoch + 1 << ":" << endl;
+        
+        auto [updated_weights, updated_biases] = nn.train(input, target, weights, biases);
+        
+        // Print weights and biases
+        print_weights_biases(updated_weights, updated_biases);
+        
+        // Update for next epoch
+        weights = updated_weights;
+        biases = updated_biases;
+    }
+
+    // After training, perform forward pass with final weights and biases
+    cout << "\nFinal Forward Pass Results:" << endl;
+    vector<double> outputs = nn.forward_pass(input, weights, biases);
+    cout << "Outputs: [";
+    for (size_t i = 0; i < outputs.size(); ++i) {
+        cout << outputs[i];
+        if (i < outputs.size() - 1) cout << ", ";
+    }
+    cout << "]" << endl;
+
     return 0;
 }
