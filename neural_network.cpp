@@ -97,7 +97,7 @@ private:
 
 public:
     NeuralNetwork(int num_hidden, const vector<int>& neurons_hidden, int output_size,
-                  double lr, const vector<Activation>& activations, int epochs)
+                  double lr, const vector<Activation>& activations)
         : num_hidden_layers(num_hidden), neurons_per_hidden(neurons_hidden),
           output_neurons(output_size), learning_rate(lr),
           activation_functions(activations) {
@@ -256,7 +256,7 @@ int main() {
 
     // Create neural network
     NeuralNetwork nn(num_hidden_layers, neurons_per_hidden, output_neurons,
-                    learning_rate, activation_functions, epochs);
+                    learning_rate, activation_functions);
 
     // Sample input and target
     vector<double> input = {0.5, -0.2, 0.8};
