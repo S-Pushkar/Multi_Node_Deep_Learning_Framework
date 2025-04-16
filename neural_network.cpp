@@ -8,47 +8,66 @@
 
 using namespace std;
 
+enum class Activation {
+    SIGMOID,
+    TANH,
+    RELU,
+    LINEAR
+};
+
 class NeuralNetwork {
 private:
     int num_hidden_layers;
     vector<int> neurons_per_hidden;
     int output_neurons;
     double learning_rate;
-    vector<string> activation_functions;
+    vector<Activation> activation_functions;
 
-    vector<double> apply_activation(const vector<double>& z, const string& name) {
+    vector<double> apply_activation(const vector<double>& z, Activation& activation) {
         vector<double> result;
         for (double val : z) {
-            if (name == "sigmoid") {
-                result.push_back(1.0 / (1 + exp(-val)));
-            } else if (name == "tanh") {
-                result.push_back(tanh(val));
-            } else if (name == "relu") {
-                result.push_back(max(0.0, val));
-            } else if (name == "linear") {
-                result.push_back(val);
-            } else {
-                throw invalid_argument("Unknown activation function: " + name);
+            switch (activation) {
+                case Activation::SIGMOID:
+                    result.push_back(1.0 / (1 + exp(-val)));
+                    break;
+                case Activation::TANH:
+                    result.push_back(tanh(val));
+                    break;
+                case Activation::RELU:
+                    result.push_back(max(0.0, val));
+                    break;
+                case Activation::LINEAR:
+                    result.push_back(val);
+                    break;
+                default:
+                    throw invalid_argument("Unknown activation function");
             }
         }
         return result;
     }
 
-    vector<double> apply_activation_derivative(const vector<double>& z, const string& name) {
+    vector<double> apply_activation_derivative(const vector<double>& z, Activation& activation) {
         vector<double> result;
         for (double val : z) {
-            if (name == "sigmoid") {
-                double s = 1.0 / (1 + exp(-val));
-                result.push_back(s * (1 - s));
-            } else if (name == "tanh") {
-                double t = tanh(val);
-                result.push_back(1 - t * t);
-            } else if (name == "relu") {
-                result.push_back(val > 0 ? 1.0 : 0.0);
-            } else if (name == "linear") {
-                result.push_back(1.0);
-            } else {
-                throw invalid_argument("Unknown activation function: " + name);
+            switch (activation) {
+                case Activation::SIGMOID: {
+                    double s = 1.0 / (1 + exp(-val));
+                    result.push_back(s * (1 - s));
+                    break;
+                }
+                case Activation::TANH: {
+                    double t = tanh(val);
+                    result.push_back(1 - t * t);
+                    break;
+                }
+                case Activation::RELU:
+                    result.push_back(val > 0 ? 1.0 : 0.0);
+                    break;
+                case Activation::LINEAR:
+                    result.push_back(1.0);
+                    break;
+                default:
+                    throw invalid_argument("Unknown activation function");
             }
         }
         return result;
@@ -78,7 +97,7 @@ private:
 
 public:
     NeuralNetwork(int num_hidden, const vector<int>& neurons_hidden, int output_size,
-                  double lr, const vector<string>& activations, int epochs)
+                  double lr, const vector<Activation>& activations, int epochs)
         : num_hidden_layers(num_hidden), neurons_per_hidden(neurons_hidden),
           output_neurons(output_size), learning_rate(lr),
           activation_functions(activations) {
@@ -232,7 +251,7 @@ int main() {
     vector<int> neurons_per_hidden = {4, 3}; // 4 neurons in first hidden layer, 3 in second
     int output_neurons = 2;
     double learning_rate = 0.1;
-    vector<string> activation_functions = {"relu", "tanh", "sigmoid"}; // for hidden layers and output
+    vector<Activation> activation_functions = {Activation::RELU, Activation::TANH, Activation::SIGMOID}; // for hidden layers and output
     int epochs = 200;
 
     // Create neural network
