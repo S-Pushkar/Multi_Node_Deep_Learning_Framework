@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <iomanip>
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 #include "neural_network.hpp"
@@ -131,6 +132,52 @@ vector<vector<double>> initialize_biases(const Config& config) {
     return biases;
 }
 
+
+double calculate_accuracy(NeuralNetwork& nn,
+    const vector<vector<double>>& test_data,
+    const vector<vector<vector<double>>>& weights,
+    const vector<vector<double>>& biases,
+    int output_size) {
+int correct = 0;
+for (const auto& sample : test_data) {
+vector<double> input(sample.begin(), sample.end() - output_size);
+vector<double> target(sample.end() - output_size, sample.end());
+
+vector<double> prediction = nn.forward_pass(input, weights, biases);
+
+// For classification: compare predicted class vs true class
+int predicted_class = distance(prediction.begin(), 
+                max_element(prediction.begin(), prediction.end()));
+int true_class = distance(target.begin(), 
+           max_element(target.begin(), target.end()));
+
+if (predicted_class == true_class) {
+correct++;
+}
+}
+return static_cast<double>(correct) / test_data.size();
+}
+
+
+double calculate_mse(NeuralNetwork& nn,
+    const vector<vector<double>>& test_data,
+    const vector<vector<vector<double>>>& weights,
+    const vector<vector<double>>& biases,
+    int output_size) {
+double total_error = 0.0;
+for (const auto& sample : test_data) {
+vector<double> input(sample.begin(), sample.end() - output_size);
+vector<double> target(sample.end() - output_size, sample.end());
+
+vector<double> prediction = nn.forward_pass(input, weights, biases);
+
+for (size_t i = 0; i < prediction.size(); ++i) {
+double error = prediction[i] - target[i];
+total_error += error * error;
+}
+}
+return total_error / (test_data.size() * output_size);
+}
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -265,6 +312,29 @@ int main(int argc, char* argv[]) {
             if (i != layer.size() - 1) out_file << ", ";
         }
         out_file << "]" << endl;
+    }
+    // Evaluation Section
+    cout << "\nEvaluating model performance..." << endl;
+    
+    // Load test data (using first dataset for demonstration)
+    auto test_data = load_dataset(config.dataset_files[2]);
+    
+    // Calculate metrics
+    double accuracy = calculate_accuracy(networks[0], test_data, 
+                                       global_weights, global_biases, output_size);
+    double mse = calculate_mse(networks[0], test_data,
+                              global_weights, global_biases, output_size);
+    
+    cout << fixed << setprecision(4);
+    cout << "Evaluation Results:" << endl;
+    cout << "------------------" << endl;
+    cout << "Accuracy: " << accuracy * 100 << "%" << endl;
+    cout << "Mean Squared Error: " << mse << endl;
+    
+    // Confusion matrix (for classification)
+    if (output_size > 1) {  // Only for classification
+        cout << "\nConfusion Matrix:" << endl;
+        // Implement confusion matrix calculation here
     }
 
     cout << "Training complete. Model saved to " << output_file << endl;
