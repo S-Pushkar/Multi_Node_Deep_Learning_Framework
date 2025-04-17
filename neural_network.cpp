@@ -2,24 +2,27 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <omp.h>
 
 using namespace std;
 
 vector<double> NeuralNetwork::apply_activation(const vector<double>& z, Activation& activation) {
-    vector<double> result;
-    for (double val : z) {
+    vector<double> result(z.size());
+    #pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(z.size()); ++i) {
+        double val = z[i];
         switch (activation) {
             case Activation::SIGMOID:
-                result.push_back(1.0 / (1 + exp(-val)));
+                result[i] = 1.0 / (1 + exp(-val));
                 break;
             case Activation::TANH:
-                result.push_back(tanh(val));
+                result[i] = tanh(val);
                 break;
             case Activation::RELU:
-                result.push_back(max(0.0, val));
+                result[i] = max(0.0, val);
                 break;
             case Activation::LINEAR:
-                result.push_back(val);
+                result[i] = val;
                 break;
             default:
                 throw invalid_argument("Unknown activation function");
@@ -29,24 +32,26 @@ vector<double> NeuralNetwork::apply_activation(const vector<double>& z, Activati
 }
 
 vector<double> NeuralNetwork::apply_activation_derivative(const vector<double>& z, Activation& activation) {
-    vector<double> result;
-    for (double val : z) {
+    vector<double> result(z.size());
+    #pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(z.size()); ++i) {
+        double val = z[i];
         switch (activation) {
             case Activation::SIGMOID: {
                 double s = 1.0 / (1 + exp(-val));
-                result.push_back(s * (1 - s));
+                result[i] = s * (1 - s);
                 break;
             }
             case Activation::TANH: {
                 double t = tanh(val);
-                result.push_back(1 - t * t);
+                result[i] = 1 - t * t;
                 break;
             }
             case Activation::RELU:
-                result.push_back(val > 0 ? 1.0 : 0.0);
+                result[i] = val > 0 ? 1.0 : 0.0;
                 break;
             case Activation::LINEAR:
-                result.push_back(1.0);
+                result[i] = 1.0;
                 break;
             default:
                 throw invalid_argument("Unknown activation function");
@@ -59,9 +64,10 @@ vector<double> NeuralNetwork::subtract_vectors(const vector<double>& a, const ve
     if (a.size() != b.size()) {
         throw invalid_argument("Vector sizes do not match for subtraction");
     }
-    vector<double> result;
-    for (size_t i = 0; i < a.size(); ++i) {
-        result.push_back(a[i] - b[i]);
+    vector<double> result(a.size());
+    #pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(a.size()); ++i) {
+        result[i] = a[i] - b[i];
     }
     return result;
 }
@@ -70,9 +76,10 @@ vector<double> NeuralNetwork::hadamard_product(const vector<double>& a, const ve
     if (a.size() != b.size()) {
         throw invalid_argument("Vector sizes do not match for Hadamard product");
     }
-    vector<double> result;
-    for (size_t i = 0; i < a.size(); ++i) {
-        result.push_back(a[i] * b[i]);
+    vector<double> result(a.size());
+    #pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(a.size()); ++i) {
+        result[i] = a[i] * b[i];
     }
     return result;
 }
@@ -95,15 +102,16 @@ vector<double> NeuralNetwork::forward_pass(const vector<double>& input,
     for (int l = 0; l < num_hidden_layers + 1; ++l) {
         const vector<vector<double>>& W = weights[l];
         const vector<double>& b = biases[l];
-        vector<double> z;
+        vector<double> z(W.size());
 
-        for (size_t i = 0; i < W.size(); ++i) {
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(W.size()); ++i) {
             double sum = 0.0;
             for (size_t j = 0; j < activation.size(); ++j) {
                 sum += activation[j] * W[i][j];
             }
             sum += b[i];
-            z.push_back(sum);
+            z[i] = sum;
         }
 
         activation = apply_activation(z, activation_functions[l]);
@@ -129,17 +137,15 @@ pair<vector<vector<vector<double>>>, vector<vector<double>>> NeuralNetwork::trai
         const vector<vector<double>>& W = weights[l];
         const vector<double>& b = biases[l];
 
-        vector<double> z;
-        for (size_t i = 0; i < W.size(); ++i) {
+        vector<double> z(W.size());
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(W.size()); ++i) {
             double sum = 0.0;
-            if (W[i].size() != a_prev.size()) {
-                throw invalid_argument("Weight matrix dimension mismatch in layer " + to_string(l));
-            }
             for (size_t j = 0; j < a_prev.size(); ++j) {
                 sum += a_prev[j] * W[i][j];
             }
             sum += b[i];
-            z.push_back(sum);
+            z[i] = sum;
         }
         zs.push_back(z);
 
@@ -163,7 +169,8 @@ pair<vector<vector<vector<double>>>, vector<vector<double>>> NeuralNetwork::trai
         vector<double> z_prev = zs[l];
 
         vector<double> wT_delta(W_next[0].size(), 0.0);
-        for (size_t i = 0; i < W_next[0].size(); ++i) {
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(W_next[0].size()); ++i) {
             for (size_t j = 0; j < W_next.size(); ++j) {
                 wT_delta[i] += W_next[j][i] * delta_next[j];
             }
@@ -188,13 +195,15 @@ pair<vector<vector<vector<double>>>, vector<vector<double>>> NeuralNetwork::trai
         vector<vector<double>>& W = updated_weights[l];
         vector<double>& b = updated_biases[l];
 
-        for (size_t i = 0; i < W.size(); ++i) {
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(W.size()); ++i) {
             for (size_t j = 0; j < a_prev.size(); ++j) {
                 W[i][j] -= learning_rate * a_prev[j] * delta[i];
             }
         }
 
-        for (size_t i = 0; i < b.size(); ++i) {
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(b.size()); ++i) {
             b[i] -= learning_rate * delta[i];
         }
     }

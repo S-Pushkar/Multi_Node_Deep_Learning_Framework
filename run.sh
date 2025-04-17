@@ -1,0 +1,1 @@
+OMP_NUM_THREADS=4 OMP_PROC_BIND=close ./deep_learning_framework $1
