@@ -18,9 +18,33 @@ struct Config {
     vector<string> activation_functions;
     int num_epochs;
     vector<string> dataset_files;
+    vector<string> metrics;
     // Removed: output_files
 };
 
+// Config parse_config(const string &config_file) {
+//     Config config;
+//     try {
+//         YAML::Node node = YAML::LoadFile(config_file);
+
+//         config.num_threads = node["num_threads"].as<int>();
+//         config.num_hidden_layers = node["num_hidden_layers"].as<int>();
+//         config.neurons_per_hidden = node["neurons_per_hidden"].as<vector<int>>();
+//         config.learning_rate = node["learning_rate"].as<double>();
+//         config.activation_functions = node["activation_functions"].as<vector<string>>();
+//         config.num_epochs = node["num_epochs"].as<int>();
+//         config.dataset_files = node["dataset_files"].as<vector<string>>();
+
+//         if(config.dataset_files.size() != config.num_threads) {
+//             throw runtime_error("Number of dataset files must match number of threads");
+//         }
+
+//         return config;
+//     } catch(const YAML::Exception &e) {
+//         cerr << "Error parsing YAML config: " << e.what() << endl;
+//         exit(1);
+//     }
+// }
 Config parse_config(const string &config_file) {
     Config config;
     try {
@@ -33,6 +57,10 @@ Config parse_config(const string &config_file) {
         config.activation_functions = node["activation_functions"].as<vector<string>>();
         config.num_epochs = node["num_epochs"].as<int>();
         config.dataset_files = node["dataset_files"].as<vector<string>>();
+        if (node["metrics"])
+            config.metrics = node["metrics"].as<vector<string>>();
+        else
+            config.metrics = {};
 
         if(config.dataset_files.size() != config.num_threads) {
             throw runtime_error("Number of dataset files must match number of threads");
@@ -44,7 +72,6 @@ Config parse_config(const string &config_file) {
         exit(1);
     }
 }
-
 vector<Activation> parse_activations(const vector<string> &activations_str) {
     vector<Activation> activations;
     for(const auto &act : activations_str) {
@@ -62,6 +89,42 @@ vector<Activation> parse_activations(const vector<string> &activations_str) {
         }
     }
     return activations;
+}
+
+double calculate_mae(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    double total = 0.0;
+    for (size_t i = 0; i < preds.size(); ++i)
+        for (size_t j = 0; j < preds[i].size(); ++j)
+            total += abs(preds[i][j] - targets[i][j]);
+    return total / (preds.size() * preds[0].size());
+}
+
+double calculate_rmse(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    double total = 0.0;
+    for (size_t i = 0; i < preds.size(); ++i)
+        for (size_t j = 0; j < preds[i].size(); ++j)
+            total += pow(preds[i][j] - targets[i][j], 2);
+    return sqrt(total / (preds.size() * preds[0].size()));
+}
+
+double calculate_r2(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    double mean = 0.0;
+    int count = 0;
+    for (const auto& t : targets)
+        for (double val : t) {
+            mean += val;
+            count++;
+        }
+    mean /= count;
+
+    double ss_tot = 0.0, ss_res = 0.0;
+    for (size_t i = 0; i < targets.size(); ++i) {
+        for (size_t j = 0; j < targets[i].size(); ++j) {
+            ss_res += pow(targets[i][j] - preds[i][j], 2);
+            ss_tot += pow(targets[i][j] - mean, 2);
+        }
+    }
+    return 1.0 - (ss_res / ss_tot);
 }
 
 vector<vector<double>> load_dataset(const string &filename) {
@@ -319,7 +382,22 @@ int main(int argc, char *argv[]) {
     cout << "\nEvaluating model performance..." << endl;
 
     // Load test data (using first dataset for demonstration)
-    auto test_data = load_dataset(config.dataset_files[2]);
+    // auto test_data = load_dataset(config.dataset_files[2]);
+    vector<vector<double>> test_data;
+    for (const auto& file : config.dataset_files) {
+        auto data = load_dataset(file);
+        test_data.insert(test_data.end(), data.begin(), data.end());
+    }
+
+
+    vector<vector<double>> predictions, targets;
+    for (const auto &sample : test_data) {
+        vector<double> input(sample.begin(), sample.end() - output_size);
+        vector<double> target(sample.end() - output_size, sample.end());
+        vector<double> pred = networks[0].forward_pass(input, global_weights, global_biases);
+        predictions.push_back(pred);
+        targets.push_back(target);
+    }
 
     // Calculate metrics
     double accuracy = calculate_accuracy(networks[0], test_data,
@@ -330,13 +408,68 @@ int main(int argc, char *argv[]) {
     cout << fixed << setprecision(4);
     cout << "Evaluation Results:" << endl;
     cout << "------------------" << endl;
-    cout << "Accuracy: " << accuracy * 100 << "%" << endl;
-    cout << "Mean Squared Error: " << mse << endl;
+    // cout << "Accuracy: " << accuracy * 100 << "%" << endl;
+    // cout << "Mean Squared Error: " << mse << endl;
+    for (const auto& metric : config.metrics) {
+    if (metric == "Accuracy" && output_size > 1) {
+        double acc = calculate_accuracy(networks[0], test_data, global_weights, global_biases, output_size);
+        cout << "Accuracy: " << acc * 100 << "%" << endl;
+    } else if (metric == "Loss") {
+        double mse = calculate_mse(networks[0], test_data, global_weights, global_biases, output_size);
+        cout << "Mean Squared Error: " << mse << endl;
+    } else if (metric == "MAE") {
+        cout << "Mean Absolute Error: " << calculate_mae(predictions, targets) << endl;
+    } else if (metric == "RMSE") {
+        cout << "Root Mean Square Error: " << calculate_rmse(predictions, targets) << endl;
+    } else if (metric == "R2") {
+        cout << "R^2 Score: " << calculate_r2(predictions, targets) << endl;
+    } else if (metric == "Confusion Matrix" && output_size > 1) {
+    vector<vector<int>> confusion(output_size, vector<int>(output_size, 0));
+    for (size_t i = 0; i < predictions.size(); ++i) {
+        int true_label = distance(targets[i].begin(), max_element(targets[i].begin(), targets[i].end()));
+        int pred_label = distance(predictions[i].begin(), max_element(predictions[i].begin(), predictions[i].end()));
+        confusion[true_label][pred_label]++;
+    }
+    cout << "Confusion Matrix:\n";
+    for (const auto& row : confusion) {
+        for (int val : row)
+            cout << setw(5) << val << " ";
+        cout << endl;
+    }
+}
+else if (metric == "AUC" && output_size > 1) {
+    auto auc_1v_all = [&](int class_idx) -> double {
+        vector<pair<double, int>> scores;
+        for (size_t i = 0; i < predictions.size(); ++i) {
+            scores.emplace_back(predictions[i][class_idx], targets[i][class_idx] > 0.5 ? 1 : 0);
+        }
+        sort(scores.begin(), scores.end(), greater<>());
+        int pos = 0, neg = 0;
+        for (const auto& s : scores) s.second ? ++pos : ++neg;
+        if (pos == 0 || neg == 0) return 0.0;
+        double tp = 0, fp = 0, auc = 0.0;
+        for (const auto& [score, label] : scores) {
+            if (label == 1) tp++;
+            else {
+                auc += tp;
+                fp++;
+            }
+        }
+        return auc / (pos * neg);
+    };
 
-    // Confusion matrix (for classification)
+    double macro_auc = 0.0;
+    for (int i = 0; i < output_size; ++i)
+        macro_auc += auc_1v_all(i);
+    macro_auc /= output_size;
+
+    cout << "AUC Score (macro-averaged): " << macro_auc << endl;
+        }
+
+    }
     if(output_size > 1) {
         // Only for classification
-        cout << "\nConfusion Matrix:" << endl;
+        // cout << "\nConfusion Matrix:" << endl;
         // Implement confusion matrix calculation here
     }
 
