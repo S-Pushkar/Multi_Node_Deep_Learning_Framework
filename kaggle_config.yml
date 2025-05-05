@@ -1,0 +1,8 @@
+num_threads: 4
+num_hidden_layers: 4
+neurons_per_hidden: [128, 64, 32, 1]
+learning_rate: 0.001
+activation_functions: ["leaky_relu", "leaky_relu", "leaky_relu", "leaky_relu", "linear"]
+num_epochs: 5000
+dataset_files: ["./kaggle_dataset/train_split_part_1.csv", "./kaggle_dataset/train_split_part_2.csv", "./kaggle_dataset/train_split_part_3.csv", "./kaggle_dataset/train_split_part_4.csv"]
+matrics: ["MSE", "MAE", "RMSE", "R2"]
