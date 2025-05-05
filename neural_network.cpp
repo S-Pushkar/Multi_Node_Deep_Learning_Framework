@@ -21,6 +21,9 @@ vector<double> NeuralNetwork::apply_activation(const vector<double>& z, Activati
             case Activation::RELU:
                 result[i] = max(0.0, val);
                 break;
+            case Activation::LEAKY_RELU:
+                result[i] = val > 0 ? val : 0.01 * val;
+                break;
             case Activation::LINEAR:
                 result[i] = val;
                 break;
@@ -49,6 +52,9 @@ vector<double> NeuralNetwork::apply_activation_derivative(const vector<double>& 
             }
             case Activation::RELU:
                 result[i] = val > 0 ? 1.0 : 0.0;
+                break;
+            case Activation::LEAKY_RELU:
+                result[i] = val > 0 ? 1.0 : 0.01;
                 break;
             case Activation::LINEAR:
                 result[i] = 1.0;

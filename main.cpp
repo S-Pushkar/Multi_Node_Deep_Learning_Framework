@@ -81,6 +81,8 @@ vector<Activation> parse_activations(const vector<string> &activations_str) {
             activations.push_back(Activation::TANH);
         else if(act == "relu")
             activations.push_back(Activation::RELU);
+        else if(act == "leaky_relu")
+            activations.push_back(Activation::LEAKY_RELU);
         else if(act == "linear")
             activations.push_back(Activation::LINEAR);
         else {

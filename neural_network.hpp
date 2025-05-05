@@ -9,6 +9,7 @@ enum class Activation {
     SIGMOID,
     TANH,
     RELU,
+    LEAKY_RELU,
     LINEAR
 };
 
