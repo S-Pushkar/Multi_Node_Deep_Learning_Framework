@@ -6,7 +6,29 @@
 
 using namespace std;
 
-vector<double> NeuralNetwork::apply_activation(const vector<double>& z, Activation& activation) {
+vector<double> NeuralNetwork::softmax(const vector<double>& z) {
+    vector<double> res(z.size());
+    double max_z = *max_element(z.begin(), z.end());
+    double sum = 0.0;
+    
+    // Combined exp and sum calculation
+    #pragma omp parallel for reduction(+:sum)
+    for (int i = 0; i < static_cast<int>(z.size()); ++i) {
+        res[i] = exp(z[i] - max_z);
+        sum += res[i];
+    }
+
+    // Normalization with single loop
+    double inv_sum = 1.0 / sum;  // Multiplication is faster than division
+    #pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(res.size()); ++i) {
+        res[i] *= inv_sum;
+    }
+    
+    return res;
+}
+
+vector<double> NeuralNetwork::apply_activation(const vector<double>& z, const Activation& activation) {
     vector<double> result(z.size());
     #pragma omp parallel for
     for (int i = 0; i < static_cast<int>(z.size()); ++i) {
@@ -27,14 +49,21 @@ vector<double> NeuralNetwork::apply_activation(const vector<double>& z, Activati
             case Activation::LINEAR:
                 result[i] = val;
                 break;
+            case Activation::SOFTMAX:
+                break;
             default:
                 throw invalid_argument("Unknown activation function");
         }
     }
+
+    if (activation == Activation::SOFTMAX) {
+        return softmax(z);
+    }
+
     return result;
 }
 
-vector<double> NeuralNetwork::apply_activation_derivative(const vector<double>& z, Activation& activation) {
+vector<double> NeuralNetwork::apply_activation_derivative(const vector<double>& z, const Activation& activation) {
     vector<double> result(z.size());
     #pragma omp parallel for
     for (int i = 0; i < static_cast<int>(z.size()); ++i) {
@@ -59,11 +88,23 @@ vector<double> NeuralNetwork::apply_activation_derivative(const vector<double>& 
             case Activation::LINEAR:
                 result[i] = 1.0;
                 break;
+            case Activation::SOFTMAX:
+                throw invalid_argument("Softmax derivative should not be called directly");
+                break;
             default:
                 throw invalid_argument("Unknown activation function");
         }
     }
     return result;
+}
+
+double NeuralNetwork::cross_entropy_loss(const vector<double>& pred, const vector<double>& target) {
+    double loss = 0.0;
+    #pragma omp parallel for reduction(-:loss)
+    for (int i = 0; i < static_cast<int>(pred.size()); ++i) {
+        loss += target[i] * log(max(pred[i], 1e-15));
+    }
+    return -loss;
 }
 
 vector<double> NeuralNetwork::subtract_vectors(const vector<double>& a, const vector<double>& b) {
@@ -132,9 +173,9 @@ pair<vector<vector<vector<double>>>, vector<vector<double>>> NeuralNetwork::trai
     const vector<vector<vector<double>>>& weights,
     const vector<vector<double>>& biases) {
 
-    int num_layers = num_hidden_layers + 1;
+    const int num_layers = num_hidden_layers + 1;
 
-    // Forward pass
+    // ================== FORWARD PASS ==================
     vector<vector<double>> activations = {input};
     vector<vector<double>> zs;
 
@@ -142,72 +183,106 @@ pair<vector<vector<vector<double>>>, vector<vector<double>>> NeuralNetwork::trai
         const vector<double>& a_prev = activations.back();
         const vector<vector<double>>& W = weights[l];
         const vector<double>& b = biases[l];
+        const Activation activation = activation_functions[l];
 
         vector<double> z(W.size());
+        
+        // Parallel matrix-vector multiplication + bias
         #pragma omp parallel for
         for (int i = 0; i < static_cast<int>(W.size()); ++i) {
-            double sum = 0.0;
+            double sum = b[i];  // Start with bias
+            #pragma omp simd
             for (size_t j = 0; j < a_prev.size(); ++j) {
                 sum += a_prev[j] * W[i][j];
             }
-            sum += b[i];
             z[i] = sum;
         }
         zs.push_back(z);
 
-        vector<double> a = apply_activation(z, activation_functions[l]);
-        activations.push_back(a);
+        // Apply activation (with special softmax handling)
+        if (l == num_layers - 1 && activation == Activation::SOFTMAX) {
+            activations.push_back(softmax(z));
+        } else {
+            activations.push_back(apply_activation(z, activation));
+        }
     }
 
-    // Backward pass
+    // ================== BACKWARD PASS ==================
     vector<vector<double>> deltas;
     vector<double> a_output = activations.back();
     vector<double> z_output = zs.back();
-    vector<double> delta_output = hadamard_product(
-        subtract_vectors(a_output, target),
-        apply_activation_derivative(z_output, activation_functions.back())
-    );
+
+    // Output layer delta - special handling for softmax + cross-entropy
+    vector<double> delta_output(a_output.size());
+    if (activation_functions.back() == Activation::SOFTMAX) {
+        // Simplified gradient: ∂L/∂z = (a - y) for softmax + cross-entropy
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(a_output.size()); ++i) {
+            delta_output[i] = a_output[i] - target[i];
+        }
+    } else {
+        // Standard backprop for other activations
+        vector<double> deriv = apply_activation_derivative(z_output, activation_functions.back());
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(a_output.size()); ++i) {
+            delta_output[i] = (a_output[i] - target[i]) * deriv[i];
+        }
+    }
     deltas.push_back(delta_output);
 
+    // Hidden layer deltas (backwards pass)
     for (int l = num_layers - 2; l >= 0; --l) {
-        vector<double> delta_next = deltas.back();
-        vector<vector<double>> W_next = weights[l + 1];
-        vector<double> z_prev = zs[l];
+        const vector<double>& delta_next = deltas.back();
+        const vector<vector<double>>& W_next = weights[l + 1];
+        const vector<double>& z_prev = zs[l];
+        const Activation activation = activation_functions[l];
 
+        // Calculate W^T * delta_next
         vector<double> wT_delta(W_next[0].size(), 0.0);
         #pragma omp parallel for
         for (int i = 0; i < static_cast<int>(W_next[0].size()); ++i) {
+            double sum = 0.0;
+            #pragma omp simd
             for (size_t j = 0; j < W_next.size(); ++j) {
-                wT_delta[i] += W_next[j][i] * delta_next[j];
+                sum += W_next[j][i] * delta_next[j];
             }
+            wT_delta[i] = sum;
         }
 
-        vector<double> delta_l = hadamard_product(
-            wT_delta,
-            apply_activation_derivative(z_prev, activation_functions[l])
-        );
+        // Hadamard product with activation derivative
+        vector<double> delta_l(wT_delta.size());
+        vector<double> deriv = apply_activation_derivative(z_prev, activation);
+        
+        #pragma omp parallel for
+        for (int i = 0; i < static_cast<int>(delta_l.size()); ++i) {
+            delta_l[i] = wT_delta[i] * deriv[i];
+        }
+        
         deltas.push_back(delta_l);
     }
-
     reverse(deltas.begin(), deltas.end());
 
-    // Update weights and biases
+    // ================== UPDATE WEIGHTS ==================
     vector<vector<vector<double>>> updated_weights = weights;
     vector<vector<double>> updated_biases = biases;
 
     for (int l = 0; l < num_layers; ++l) {
-        vector<double> delta = deltas[l];
-        vector<double> a_prev = activations[l];
+        const vector<double>& delta = deltas[l];
+        const vector<double>& a_prev = activations[l];
         vector<vector<double>>& W = updated_weights[l];
         vector<double>& b = updated_biases[l];
 
+        // Update weights
         #pragma omp parallel for
         for (int i = 0; i < static_cast<int>(W.size()); ++i) {
+            const double delta_i = delta[i] * learning_rate;
+            #pragma omp simd
             for (size_t j = 0; j < a_prev.size(); ++j) {
-                W[i][j] -= learning_rate * a_prev[j] * delta[i];
+                W[i][j] -= delta_i * a_prev[j];
             }
         }
 
+        // Update biases
         #pragma omp parallel for
         for (int i = 0; i < static_cast<int>(b.size()); ++i) {
             b[i] -= learning_rate * delta[i];

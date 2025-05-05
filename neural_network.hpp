@@ -10,7 +10,8 @@ enum class Activation {
     TANH,
     RELU,
     LEAKY_RELU,
-    LINEAR
+    LINEAR,
+    SOFTMAX
 };
 
 class NeuralNetwork {
@@ -21,10 +22,11 @@ private:
     double learning_rate;
     std::vector<Activation> activation_functions;
 
-    std::vector<double> apply_activation(const std::vector<double>& z, Activation& activation);
-    std::vector<double> apply_activation_derivative(const std::vector<double>& z, Activation& activation);
+    std::vector<double> apply_activation(const std::vector<double>& z, const Activation& activation);
+    std::vector<double> apply_activation_derivative(const std::vector<double>& z, const Activation& activation);
     std::vector<double> subtract_vectors(const std::vector<double>& a, const std::vector<double>& b);
     std::vector<double> hadamard_product(const std::vector<double>& a, const std::vector<double>& b);
+    std::vector<double> softmax(const std::vector<double>& z);
 
 public:
     NeuralNetwork(int num_hidden, const std::vector<int>& neurons_hidden, int output_size,
@@ -39,6 +41,8 @@ public:
         const std::vector<double>& target,
         const std::vector<std::vector<std::vector<double>>>& weights,
         const std::vector<std::vector<double>>& biases);
+    
+    double cross_entropy_loss(const std::vector<double>& pred, const std::vector<double>& target);
 };
 
 #endif // NEURAL_NETWORK_HPP

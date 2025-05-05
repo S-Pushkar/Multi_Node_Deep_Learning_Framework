@@ -85,6 +85,8 @@ vector<Activation> parse_activations(const vector<string> &activations_str) {
             activations.push_back(Activation::LEAKY_RELU);
         else if(act == "linear")
             activations.push_back(Activation::LINEAR);
+        else if(act == "softmax")
+            activations.push_back(Activation::SOFTMAX);
         else {
             cerr << "Unknown activation function: " << act << endl;
             exit(1);
@@ -223,6 +225,24 @@ double calculate_accuracy(NeuralNetwork &nn,
         }
     }
     return static_cast<double>(correct) / test_data.size();
+}
+
+double calculate_loss(NeuralNetwork &nn,
+                     const vector<vector<double>> &test_data,
+                     const vector<vector<vector<double>>> &weights,
+                     const vector<vector<double>> &biases,
+                     int output_size) {
+    double total_loss = 0.0;
+
+    for(const auto &sample : test_data) {
+        vector<double> input(sample.begin(), sample.end() - output_size);
+        vector<double> target(sample.end() - output_size, sample.end());
+
+        vector<double> prediction = nn.forward_pass(input, weights, biases);
+        total_loss += nn.cross_entropy_loss(prediction, target);
+    }
+    
+    return total_loss / test_data.size();
 }
 
 double calculate_mse(NeuralNetwork &nn,
@@ -416,9 +436,12 @@ int main(int argc, char *argv[]) {
     if (metric == "Accuracy" && output_size > 1) {
         double acc = calculate_accuracy(networks[0], test_data, global_weights, global_biases, output_size);
         cout << "Accuracy: " << acc * 100 << "%" << endl;
-    } else if (metric == "Loss") {
+    } else if (metric == "MSE") {
         double mse = calculate_mse(networks[0], test_data, global_weights, global_biases, output_size);
         cout << "Mean Squared Error: " << mse << endl;
+    } else if (metric == "Cross-Entropy") {
+        double loss = calculate_loss(networks[0], test_data, global_weights, global_biases, output_size);
+        cout << "Cross-Entropy Loss: " << loss << endl;
     } else if (metric == "MAE") {
         cout << "Mean Absolute Error: " << calculate_mae(predictions, targets) << endl;
     } else if (metric == "RMSE") {

@@ -6,4 +6,4 @@ activation_functions: ["leaky_relu", "tanh", "linear"]
 num_epochs: 100
 dataset_files: ["./dataset/data1.csv", "./dataset/data2.csv", "./dataset/data3.csv", "./dataset/data4.csv"]
 # Optional metrics to evaluate after training
-metrics: ["Accuracy","Loss", "MAE", "RMSE", "R2", "Confusion Matrix", "AUC"] #"Accuracy",
+metrics: ["Accuracy","MSE", "MAE", "RMSE", "R2", "Confusion Matrix", "AUC", "Cross-Entropy"]
