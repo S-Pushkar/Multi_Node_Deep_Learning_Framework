@@ -18,6 +18,7 @@ struct Config {
     vector<string> activation_functions;
     int num_epochs;
     vector<string> dataset_files;
+    string test_file;
     vector<string> metrics;
     // Removed: output_files
 };
@@ -41,6 +42,13 @@ Config parse_config(const string &config_file) {
         config.activation_functions = node["activation_functions"].as<vector<string>>();
         config.num_epochs = node["num_epochs"].as<int>();
         config.dataset_files = node["dataset_files"].as<vector<string>>();
+
+        if (node["test_file"]) {
+            config.test_file = node["test_file"].as<string>();
+        } else {
+            config.test_file = "";
+        }
+
         if (node["metrics"])
             config.metrics = node["metrics"].as<vector<string>>();
         else
@@ -560,5 +568,124 @@ int main(int argc, char *argv[]) {
     }
 
     cout << "\nTraining complete. Model saved to " << output_file << endl;
+
+    if (!config.test_file.empty()) {
+        cout << "\nEvaluating on separate test file: " << config.test_file << endl;
+        
+        // Load and normalize test file data
+        vector<vector<double>> test_file_raw = load_dataset(config.test_file);
+        if (test_file_raw.empty()) {
+            cerr << "Warning: Test file is empty or could not be loaded" << endl;
+        } else {
+            // Verify test file has same dimensions as training data
+            if (test_file_raw[0].size() != input_size + output_size) {
+                cerr << "Error: Test file has different dimensions than training data ("
+                     << test_file_raw[0].size() << " vs " << input_size + output_size << ")" << endl;
+            } else {
+                vector<vector<double>> test_file_normalized = test_file_raw;
+                NormParams test_norm_params = normalize_dataset(test_file_normalized, input_size, output_size);
+
+                vector<vector<double>> test_predictions, test_true_targets;
+                for (size_t i = 0; i < test_file_normalized.size(); ++i) {
+                    vector<double> input(test_file_normalized[i].begin(), test_file_normalized[i].end() - output_size);
+                    vector<double> pred = networks[0].forward_pass(input, global_weights, global_biases);
+                    
+                    // Denormalize predictions
+                    vector<double> denorm_pred = denormalize_output(pred, norm_params);
+                    vector<double> original_target(test_file_raw[i].end() - output_size, test_file_raw[i].end());
+                    
+                    test_predictions.push_back(denorm_pred);
+                    test_true_targets.push_back(original_target);
+                }
+
+                // Calculate and print metrics for test file
+                cout << fixed << setprecision(6);
+                cout << "Test File Evaluation Results:" << endl;
+                cout << "----------------------------" << endl;
+
+                for (const auto& metric : config.metrics) {
+                    if (metric == "Accuracy" && output_size > 1) {
+                        double acc = calculate_accuracy(networks[0], test_file_normalized, 
+                                                      global_weights, global_biases, output_size);
+                        cout << "Accuracy: " << acc * 100 << "%" << endl;
+                    } 
+                    else if (metric == "MSE") {
+                        cout << "Mean Squared Error: " << calculate_mae(test_predictions, test_true_targets) << endl;
+                    }
+                    else if (metric == "MAE") {
+                        cout << "Mean Absolute Error: " << calculate_mae(test_predictions, test_true_targets) << endl;
+                    }
+                    else if (metric == "RMSE") {
+                        cout << "Root Mean Square Error: " << calculate_rmse(test_predictions, test_true_targets) << endl;
+                    }
+                    else if (metric == "R2") {
+                        cout << "R-squared: " << calculate_r2(test_predictions, test_true_targets) << endl;
+                    } 
+                    else if (metric == "Cross-Entropy") {
+                        double loss = calculate_loss(networks[0], test_file_normalized, 
+                                                   global_weights, global_biases, output_size);
+                        cout << "Cross-Entropy Loss: " << loss << endl;
+                    }
+                    else if (metric == "Confusion Matrix" && output_size > 1) {
+                        vector<vector<int>> confusion(output_size, vector<int>(output_size, 0));
+                        for (size_t i = 0; i < test_predictions.size(); ++i) {
+                            int true_label = distance(test_true_targets[i].begin(), 
+                                                    max_element(test_true_targets[i].begin(), test_true_targets[i].end()));
+                            int pred_label = distance(test_predictions[i].begin(), 
+                                                    max_element(test_predictions[i].begin(), test_predictions[i].end()));
+                            confusion[true_label][pred_label]++;
+                        }
+
+                        cout << "Confusion Matrix:\n";
+                        for (const auto& row : confusion) {
+                            for (int val : row)
+                                cout << setw(5) << val << " ";
+                            cout << endl;
+                        }
+                    }
+                    else if (metric == "AUC" && output_size > 1) {
+                        auto auc_1v_all = [&](int class_idx) -> double {
+                            vector<pair<double, int>> scores;
+                            for (size_t i = 0; i < test_predictions.size(); ++i) {
+                                scores.emplace_back(test_predictions[i][class_idx], 
+                                                  test_true_targets[i][class_idx] > 0.5 ? 1 : 0);
+                            }
+                            sort(scores.begin(), scores.end(), greater<>());
+                            int pos = 0, neg = 0;
+                            for (const auto& s : scores) s.second ? ++pos : ++neg;
+                            if (pos == 0 || neg == 0) return 0.0;
+                            double tp = 0, fp = 0, auc = 0.0;
+                            for (const auto& [score, label] : scores) {
+                                if (label == 1) tp++;
+                                else {
+                                    auc += tp;
+                                    fp++;
+                                }
+                            }
+                            return auc / (pos * neg);
+                        };
+                    
+                        double macro_auc = 0.0;
+                        for (int i = 0; i < output_size; ++i)
+                            macro_auc += auc_1v_all(i);
+                        macro_auc /= output_size;
+                    
+                        cout << "AUC Score (macro-averaged): " << macro_auc << endl;
+                    }
+                }
+
+                // Print sample predictions for verification
+                cout << "\nSample predictions from test file:\n";
+                for (int i = 0; i < min(5, (int)test_predictions.size()); i++) {
+                    cout << "Sample " << i << ": Pred = [";
+                    for (auto p : test_predictions[i]) cout << p << " ";
+                    cout << "], True = [";
+                    for (auto t : test_true_targets[i]) cout << t << " ";
+                    cout << "]\n";
+                }
+            }
+        }
+    }
+
     return 0;
 }
