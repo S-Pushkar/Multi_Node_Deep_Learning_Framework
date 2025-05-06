@@ -87,42 +87,6 @@ vector<Activation> parse_activations(const vector<string> &activations_str) {
     return activations;
 }
 
-double calculate_mae(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
-    double total = 0.0;
-    for (size_t i = 0; i < preds.size(); ++i)
-        for (size_t j = 0; j < preds[i].size(); ++j)
-            total += abs(preds[i][j] - targets[i][j]);
-    return total / (preds.size() * preds[0].size());
-}
-
-double calculate_rmse(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
-    double total = 0.0;
-    for (size_t i = 0; i < preds.size(); ++i)
-        for (size_t j = 0; j < preds[i].size(); ++j)
-            total += pow(preds[i][j] - targets[i][j], 2);
-    return sqrt(total / (preds.size() * preds[0].size()));
-}
-
-double calculate_r2(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
-    double mean = 0.0;
-    int count = 0;
-    for (const auto& t : targets)
-        for (double val : t) {
-            mean += val;
-            count++;
-        }
-    mean /= count;
-
-    double ss_tot = 0.0, ss_res = 0.0;
-    for (size_t i = 0; i < targets.size(); ++i) {
-        for (size_t j = 0; j < targets[i].size(); ++j) {
-            ss_res += pow(targets[i][j] - preds[i][j], 2);
-            ss_tot += pow(targets[i][j] - mean, 2);
-        }
-    }
-    return 1.0 - (ss_res / ss_tot);
-}
-
 vector<vector<double>> load_dataset(const string &filename) {
     vector<vector<double>> dataset;
     ifstream file(filename);
@@ -256,6 +220,102 @@ vector<vector<vector<double>>> initialize_weights(const Config &config, int inpu
     return weights;
 }
 
+double calculate_mae(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    double total = 0.0;
+    size_t count = 0;
+    for (size_t i = 0; i < preds.size(); ++i) {
+        for (size_t j = 0; j < preds[i].size(); ++j) {
+            total += abs(preds[i][j] - targets[i][j]);
+            count++;
+        }
+    }
+    return total / count;
+}
+
+double calculate_mse(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    double total = 0.0;
+    size_t count = 0;
+    for (size_t i = 0; i < preds.size(); ++i) {
+        for (size_t j = 0; j < preds[i].size(); ++j) {
+            double error = preds[i][j] - targets[i][j];
+            total += error * error;
+            count++;
+        }
+    }
+    return total / count;
+}
+
+double calculate_rmse(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    return sqrt(calculate_mse(preds, targets));
+}
+
+double calculate_r2(const vector<vector<double>>& preds, const vector<vector<double>>& targets) {
+    double mean = 0.0;
+    size_t count = 0;
+    for (const auto& t : targets) {
+        for (double val : t) {
+            mean += val;
+            count++;
+        }
+    }
+    mean /= count;
+
+    double ss_tot = 0.0, ss_res = 0.0;
+    for (size_t i = 0; i < targets.size(); ++i) {
+        for (size_t j = 0; j < targets[i].size(); ++j) {
+            ss_res += pow(targets[i][j] - preds[i][j], 2);
+            ss_tot += pow(targets[i][j] - mean, 2);
+        }
+    }
+    
+    // Handle case where ss_tot is 0 (constant target)
+    if (ss_tot < 1e-10) {
+        return (ss_res < 1e-10) ? 1.0 : 0.0;
+    }
+    return 1.0 - (ss_res / ss_tot);
+}
+
+double calculate_accuracy(NeuralNetwork &nn,
+                         const vector<vector<double>> &test_data,
+                         const vector<vector<vector<double>>> &weights,
+                         const vector<vector<double>> &biases,
+                         int output_size) {
+    int correct = 0;
+    for(const auto &sample : test_data) {
+        vector<double> input(sample.begin(), sample.end() - output_size);
+        vector<double> target(sample.end() - output_size, sample.end());
+
+        vector<double> prediction = nn.forward_pass(input, weights, biases);
+
+        // For classification: compare predicted class vs true class
+        int predicted_class = distance(prediction.begin(),
+                                     max_element(prediction.begin(), prediction.end()));
+        int true_class = distance(target.begin(),
+                                 max_element(target.begin(), target.end()));
+
+        if(predicted_class == true_class) {
+            correct++;
+        }
+    }
+    return static_cast<double>(correct) / test_data.size();
+}
+
+double calculate_loss(NeuralNetwork &nn,
+                    const vector<vector<double>> &test_data,
+                    const vector<vector<vector<double>>> &weights,
+                    const vector<vector<double>> &biases,
+                    int output_size) {
+    double total_loss = 0.0;
+    for(const auto &sample : test_data) {
+        vector<double> input(sample.begin(), sample.end() - output_size);
+        vector<double> target(sample.end() - output_size, sample.end());
+
+        vector<double> prediction = nn.forward_pass(input, weights, biases);
+        total_loss += nn.cross_entropy_loss(prediction, target);
+    }
+    return total_loss / test_data.size();
+}
+
 vector<vector<double>> initialize_biases(const Config &config) {
     vector<vector<double>> biases;
 
@@ -271,72 +331,6 @@ vector<vector<double>> initialize_biases(const Config &config) {
     return biases;
 }
 
-double calculate_accuracy(NeuralNetwork &nn,
-                          const vector<vector<double>> &test_data,
-                          const vector<vector<vector<double>>> &weights,
-                          const vector<vector<double>> &biases,
-                          int output_size) {
-    int correct = 0;
-    for(const auto &sample : test_data) {
-        vector<double> input(sample.begin(), sample.end() - output_size);
-        vector<double> target(sample.end() - output_size, sample.end());
-
-        vector<double> prediction = nn.forward_pass(input, weights, biases);
-
-        // For classification: compare predicted class vs true class
-        int predicted_class = distance(prediction.begin(),
-                                       max_element(prediction.begin(), prediction.end()));
-        int true_class = distance(target.begin(),
-                                  max_element(target.begin(), target.end()));
-
-        if(predicted_class == true_class) {
-            correct++;
-        }
-    }
-    return static_cast<double>(correct) / test_data.size();
-}
-
-double calculate_loss(NeuralNetwork &nn,
-                     const vector<vector<double>> &test_data,
-                     const vector<vector<vector<double>>> &weights,
-                     const vector<vector<double>> &biases,
-                     int output_size) {
-    double total_loss = 0.0;
-
-    for(const auto &sample : test_data) {
-        vector<double> input(sample.begin(), sample.end() - output_size);
-        vector<double> target(sample.end() - output_size, sample.end());
-
-        vector<double> prediction = nn.forward_pass(input, weights, biases);
-        total_loss += nn.cross_entropy_loss(prediction, target);
-    }
-    
-    return total_loss / test_data.size();
-}
-
-double calculate_mse(NeuralNetwork &nn,
-                     const vector<vector<double>> &test_data,
-                     const vector<vector<vector<double>>> &weights,
-                     const vector<vector<double>> &biases,
-                     int output_size,
-                     const NormParams &params) {
-    double total_error = 0.0;
-    for(const auto &sample : test_data) {
-        vector<double> input(sample.begin(), sample.end() - output_size);
-        vector<double> target(sample.end() - output_size, sample.end());
-
-        vector<double> prediction = nn.forward_pass(input, weights, biases);
-
-        prediction = denormalize_output(prediction, params);
-        target = denormalize_output(target, params);
-
-        for(size_t i = 0; i < prediction.size(); ++i) {
-            double error = prediction[i] - target[i];
-            total_error += error * error;
-        }
-    }
-    return total_error / (test_data.size() * output_size);
-}
 
 int main(int argc, char *argv[]) {
     if(argc != 2) {
@@ -504,7 +498,7 @@ int main(int argc, char *argv[]) {
             cout << "Accuracy: " << acc * 100 << "%" << endl;
         } 
         else if (metric == "MSE") {
-            cout << "Mean Squared Error: " << calculate_mae(predictions, true_targets) << endl;
+            cout << "Mean Squared Error: " << calculate_mse(predictions, true_targets) << endl;
         }
         else if (metric == "MAE") {
             cout << "Mean Absolute Error: " << calculate_mae(predictions, true_targets) << endl;
@@ -610,7 +604,7 @@ int main(int argc, char *argv[]) {
                         cout << "Accuracy: " << acc * 100 << "%" << endl;
                     } 
                     else if (metric == "MSE") {
-                        cout << "Mean Squared Error: " << calculate_mae(test_predictions, test_true_targets) << endl;
+                        cout << "Mean Squared Error: " << calculate_mse(test_predictions, test_true_targets) << endl;
                     }
                     else if (metric == "MAE") {
                         cout << "Mean Absolute Error: " << calculate_mae(test_predictions, test_true_targets) << endl;
