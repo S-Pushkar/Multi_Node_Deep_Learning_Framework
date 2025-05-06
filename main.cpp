@@ -591,6 +591,31 @@ int main(int argc, char *argv[]) {
                     test_predictions.push_back(denorm_pred);
                     test_true_targets.push_back(original_target);
                 }
+                
+                ofstream test_output_file("test_predictions.csv");
+                if (!test_output_file.is_open()) {
+                    cerr << "Failed to open test output file: test_predictions.csv" << endl;
+                    return 1;
+                }
+                for (size_t i = 0; i < test_predictions.size(); ++i) {
+                    test_output_file << fixed << setprecision(6);
+                    for (size_t j = 0; j < test_predictions[i].size(); ++j) {
+                        test_output_file << test_predictions[i][j];
+                        if (j != test_predictions[i].size() - 1) {
+                            test_output_file << ",";
+                        }
+                    }
+                    test_output_file << ",";
+                    for (size_t j = 0; j < test_true_targets[i].size(); ++j) {
+                        test_output_file << test_true_targets[i][j];
+                        if (j != test_true_targets[i].size() - 1) {
+                            test_output_file << ",";
+                        }
+                    }
+                    test_output_file << endl;
+                }
+                test_output_file.close();
+                cout << "Test predictions saved to test_predictions.csv" << endl;
 
                 // Calculate and print metrics for test file
                 cout << fixed << setprecision(6);
